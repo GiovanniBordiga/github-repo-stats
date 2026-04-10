@@ -140,3 +140,46 @@ setup() {
   [ "$status" -eq 0 ]
   assert_exist $BATS_TEST_TMPDIR/outdir/report_for_pdf.html
 }
+
+@test "analyze.py: --theme dark: dark CSS present in report.html, absent in report_for_pdf.html" {
+  run python analyze.py owner/repo tests/data/A/snapshots \
+    --resources-directory=resources \
+    --output-directory $BATS_TEST_TMPDIR/outdir \
+    --outfile-prefix "" \
+    --theme dark \
+    --stargazer-ts-resampled-outpath stargazers-rs.csv \
+    --fork-ts-resampled-outpath $BATS_TEST_TMPDIR/forks-rs.csv \
+    --views-clones-aggregate-inpath tests/data/A/views_clones_aggregate.csv \
+    --fork-ts-inpath=tests/data/A/forks.csv \
+    --stargazer-ts-inpath=tests/data/A/stars.csv
+  [ "$status" -eq 0 ]
+  assert_exist $BATS_TEST_TMPDIR/outdir/report.html
+  assert_exist $BATS_TEST_TMPDIR/outdir/report_for_pdf.html
+
+  # Dark CSS override should be present in browser HTML
+  run grep "background-color: #0d1117" $BATS_TEST_TMPDIR/outdir/report.html
+  [ "$status" -eq 0 ]
+
+  # PDF HTML should remain light (no dark override)
+  run grep "background-color: #0d1117" $BATS_TEST_TMPDIR/outdir/report_for_pdf.html
+  [ "$status" -eq 1 ]
+}
+
+@test "analyze.py: --theme light: dark CSS absent in report.html" {
+  run python analyze.py owner/repo tests/data/A/snapshots \
+    --resources-directory=resources \
+    --output-directory $BATS_TEST_TMPDIR/outdir \
+    --outfile-prefix "" \
+    --theme light \
+    --stargazer-ts-resampled-outpath stargazers-rs.csv \
+    --fork-ts-resampled-outpath $BATS_TEST_TMPDIR/forks-rs.csv \
+    --views-clones-aggregate-inpath tests/data/A/views_clones_aggregate.csv \
+    --fork-ts-inpath=tests/data/A/forks.csv \
+    --stargazer-ts-inpath=tests/data/A/stars.csv
+  [ "$status" -eq 0 ]
+  assert_exist $BATS_TEST_TMPDIR/outdir/report.html
+
+  # No dark CSS override should be injected for light theme
+  run grep "background-color: #0d1117" $BATS_TEST_TMPDIR/outdir/report.html
+  [ "$status" -eq 1 ]
+}

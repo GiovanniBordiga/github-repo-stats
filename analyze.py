@@ -176,39 +176,43 @@ def gen_date_axis_lim(dfs: Iterable[pd.DataFrame]) -> Tuple[str, str]:
     )
 
 
+def _ghrs_dark_theme() -> dict:
+    # Minimal dark Vega theme used as fallback when carbonplan_dark is unavailable.
+    return {
+        "config": {
+            "background": "#161b22",
+            "view": {"stroke": "transparent"},
+            "axis": {
+                "domainColor": "#8b949e",
+                "gridColor": "#30363d",
+                "labelColor": "#c9d1d9",
+                "tickColor": "#8b949e",
+                "titleColor": "#c9d1d9",
+            },
+            "header": {
+                "labelColor": "#c9d1d9",
+                "titleColor": "#c9d1d9",
+            },
+            "legend": {
+                "labelColor": "#c9d1d9",
+                "titleColor": "#c9d1d9",
+            },
+            "title": {"color": "#c9d1d9"},
+        }
+    }
+
+
 def configure_altair():
     # https://github.com/carbonplan/styles
     if ARGS.theme == "dark":
         try:
             alt.themes.enable("carbonplan_dark")
-        except (ValueError, KeyError):
+        except Exception:
             # carbonplan_dark may not be available in all versions; fall back to
             # a minimal inline dark theme that sets a dark background and light
             # text/gridline colors for Vega-Lite charts.
-            @alt.themes.register("ghrs_dark", enable=True)
-            def _ghrs_dark_theme() -> dict:
-                return {
-                    "config": {
-                        "background": "#161b22",
-                        "view": {"stroke": "transparent"},
-                        "axis": {
-                            "domainColor": "#8b949e",
-                            "gridColor": "#30363d",
-                            "labelColor": "#c9d1d9",
-                            "tickColor": "#8b949e",
-                            "titleColor": "#c9d1d9",
-                        },
-                        "header": {
-                            "labelColor": "#c9d1d9",
-                            "titleColor": "#c9d1d9",
-                        },
-                        "legend": {
-                            "labelColor": "#c9d1d9",
-                            "titleColor": "#c9d1d9",
-                        },
-                        "title": {"color": "#c9d1d9"},
-                    }
-                }
+            alt.themes.register("ghrs_dark", _ghrs_dark_theme)
+            alt.themes.enable("ghrs_dark")
     else:
         alt.themes.enable("carbonplan_light")
     # https://github.com/altair-viz/altair/issues/673#issuecomment-566567828
