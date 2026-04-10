@@ -178,7 +178,39 @@ def gen_date_axis_lim(dfs: Iterable[pd.DataFrame]) -> Tuple[str, str]:
 
 def configure_altair():
     # https://github.com/carbonplan/styles
-    alt.themes.enable("carbonplan_light")
+    if ARGS.theme == "dark":
+        try:
+            alt.themes.enable("carbonplan_dark")
+        except (ValueError, KeyError):
+            # carbonplan_dark may not be available in all versions; fall back to
+            # a minimal inline dark theme that sets a dark background and light
+            # text/gridline colors for Vega-Lite charts.
+            @alt.themes.register("ghrs_dark", enable=True)
+            def _ghrs_dark_theme() -> dict:
+                return {
+                    "config": {
+                        "background": "#161b22",
+                        "view": {"stroke": "transparent"},
+                        "axis": {
+                            "domainColor": "#8b949e",
+                            "gridColor": "#30363d",
+                            "labelColor": "#c9d1d9",
+                            "tickColor": "#8b949e",
+                            "titleColor": "#c9d1d9",
+                        },
+                        "header": {
+                            "labelColor": "#c9d1d9",
+                            "titleColor": "#c9d1d9",
+                        },
+                        "legend": {
+                            "labelColor": "#c9d1d9",
+                            "titleColor": "#c9d1d9",
+                        },
+                        "title": {"color": "#c9d1d9"},
+                    }
+                }
+    else:
+        alt.themes.enable("carbonplan_light")
     # https://github.com/altair-viz/altair/issues/673#issuecomment-566567828
     alt.renderers.set_embed_options(actions=False)
 
@@ -303,6 +335,81 @@ def gen_pandoc_html_template(target):
             </style>
         """
         )
+
+        if ARGS.theme == "dark":
+            main_style_block += textwrap.dedent(
+                """
+                <style>
+                    body {
+                        background-color: #0d1117;
+                    }
+
+                    .markdown-body {
+                        color: #c9d1d9;
+                        background-color: #0d1117;
+                    }
+
+                    .markdown-body a {
+                        color: #58a6ff;
+                    }
+
+                    .markdown-body h1,
+                    .markdown-body h2,
+                    .markdown-body h3,
+                    .markdown-body h4,
+                    .markdown-body h5,
+                    .markdown-body h6 {
+                        color: #e6edf3;
+                    }
+
+                    .markdown-body h1,
+                    .markdown-body h2 {
+                        border-bottom: 1px solid #30363d;
+                    }
+
+                    .markdown-body hr {
+                        background-color: #30363d;
+                    }
+
+                    .markdown-body blockquote {
+                        color: #8b949e;
+                        border-left-color: #30363d;
+                    }
+
+                    .markdown-body code,
+                    .markdown-body tt {
+                        background-color: #161b22;
+                        color: #c9d1d9;
+                    }
+
+                    .markdown-body pre {
+                        background-color: #161b22;
+                    }
+
+                    .markdown-body pre code {
+                        background-color: transparent;
+                    }
+
+                    .markdown-body table tr {
+                        background-color: #0d1117;
+                        border-top-color: #30363d;
+                    }
+
+                    .markdown-body table tr:nth-child(2n) {
+                        background-color: #161b22;
+                    }
+
+                    .markdown-body table th,
+                    .markdown-body table td {
+                        border-color: #30363d;
+                    }
+
+                    .markdown-body img {
+                        background-color: transparent;
+                    }
+                </style>
+            """
+            )
 
     if target == "html_pdf_view":
         main_style_block = textwrap.dedent(
@@ -1756,6 +1863,13 @@ def parse_args():
         default=False,
         action="store_true",
         help="Delete individual fragment CSV files after having written aggregate CSV file",
+    )
+
+    parser.add_argument(
+        "--theme",
+        default="dark",
+        choices=["dark", "light"],
+        help="Theme for the HTML report: dark (default) or light.",
     )
 
     args = parser.parse_args()
