@@ -194,7 +194,9 @@ def _ghrs_dark_theme() -> dict:
                 "titleColor": "#c9d1d9",
             },
             "legend": {
+                "fillColor": "transparent",
                 "labelColor": "#c9d1d9",
+                "strokeColor": "#30363d",
                 "titleColor": "#c9d1d9",
             },
             "title": {"color": "#c9d1d9"},
@@ -214,7 +216,12 @@ def configure_altair():
             alt.themes.register("ghrs_dark", _ghrs_dark_theme)
             alt.themes.enable("ghrs_dark")
     else:
-        alt.themes.enable("carbonplan_light")
+        try:
+            alt.themes.enable("carbonplan_light")
+        except Exception:
+            # carbonplan_light may not be available; Vega-Lite's default theme
+            # is already a light theme, so no explicit registration is needed.
+            pass
     # https://github.com/altair-viz/altair/issues/673#issuecomment-566567828
     alt.renderers.set_embed_options(actions=False)
 
@@ -838,6 +845,11 @@ def analyse_top_x_snapshots(entity_type, date_axis_lim):
                     # "legendX": 120,
                     # "legendY": 340,
                     "title": "Legend:",
+                    **(
+                        {"labelColor": "#c9d1d9", "titleColor": "#c9d1d9"}
+                        if ARGS.theme == "dark"
+                        else {}
+                    ),
                 },
             ),
             tooltip=[

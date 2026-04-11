@@ -163,6 +163,10 @@ setup() {
   # PDF HTML should remain light (no dark override)
   run grep "background-color: #0d1117" $BATS_TEST_TMPDIR/outdir/report_for_pdf.html
   [ "$status" -eq 1 ]
+
+  # Legend label/title colors should be injected in the chart spec for dark mode
+  run grep '"labelColor": "#c9d1d9"' $BATS_TEST_TMPDIR/outdir/report.md
+  [ "$status" -eq 0 ]
 }
 
 @test "analyze.py: --theme light: dark CSS absent in report.html" {
@@ -181,5 +185,9 @@ setup() {
 
   # No dark CSS override should be injected for light theme
   run grep "background-color: #0d1117" $BATS_TEST_TMPDIR/outdir/report.html
+  [ "$status" -eq 1 ]
+
+  # Legend label colors should NOT be injected for light mode
+  run grep '"labelColor": "#c9d1d9"' $BATS_TEST_TMPDIR/outdir/report.md
   [ "$status" -eq 1 ]
 }
