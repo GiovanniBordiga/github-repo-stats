@@ -292,7 +292,13 @@ def gen_pandoc_html_template(target):
         log.info(
             "Embedding Plotly.js inline for PDF view (version %s)", _plotlyjs_version
         )
-        plotly_js_block = f"<script>{get_plotlyjs()}</script>"
+        # Pandoc template syntax uses $var$ for substitutions and $$ for a
+        # literal dollar sign. Plotly.js contains many bare $ characters
+        # (e.g. "$&", "$1" in regex replacements) that confuse the template
+        # parser, so we escape every $ to $$ here. Pandoc writes $$ → $ in
+        # the rendered output so the browser receives the correct JavaScript.
+        plotly_js_escaped = get_plotlyjs().replace("$", "$$")
+        plotly_js_block = f"<script>{plotly_js_escaped}</script>"
 
     # Do simple string replacement instead of picking one of the established
     # templating methods: the pandoc template language uses dollar signs, and
