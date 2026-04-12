@@ -1,7 +1,6 @@
 # dependencies for fetch.py and analyze.py
 pandas==2.1.1
 PyGitHub==1.55
-altair==4.2.2
+plotly>=5.0
 pytz
 retrying
-carbonplan[styles]

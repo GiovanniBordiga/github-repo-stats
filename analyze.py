@@ -17,7 +17,6 @@ import argparse
 import logging
 import os
 import textwrap
-import json
 import glob
 import subprocess
 import shutil
@@ -30,8 +29,7 @@ from io import StringIO
 
 import pandas as pd
 import pytz
-import altair as alt  # type: ignore
-
+import plotly.graph_objects as go
 
 """
 makes use of code and methods from my other projects at
@@ -48,9 +46,6 @@ logging.basicConfig(
     datefmt="%y%m%d-%H:%M:%S",
 )
 
-# Also see https://github.com/jgehrcke/github-repo-stats/issues/52
-alt.data_transformers.disable_max_rows()
-
 NOW = datetime.utcnow()
 TODAY = NOW.strftime("%Y-%m-%d")
 OUTDIR: Optional[str] = None
@@ -62,26 +57,10 @@ ARGS: Any = None
 # Individual code sections are supposed to add to this in-memory Markdown
 # document as they desire.
 MD_REPORT = StringIO()
-JS_FOOTER_LINES: list[str] = []
-
-# https://github.com/vega/vega-embed#options -- use SVG renderer so that PDF
-# export (print) from browser view yields arbitrarily scalable (vector)
-# graphics embedded in the PDF doc, instead of rasterized graphics.
-VEGA_EMBED_OPTIONS_JSON = json.dumps({"actions": False, "renderer": "svg"})
-
-DATE_LABEL_ANGLE = 25
-DATETIME_AXIS_PROPERTIES = {
-    "field": "time",
-    "type": "temporal",
-    "title": "date",
-    "timeUnit": "utcyearmonthdate",
-    "axis": {"labelAngle": DATE_LABEL_ANGLE},
-}
 
 
 def main() -> None:
     parse_args()
-    configure_altair()
 
     df_stargazers = read_stars_over_time_from_csv()
     df_forks = read_forks_over_time_from_csv()
@@ -133,9 +112,7 @@ def main() -> None:
 
     report_pdf_pagebreak()
 
-    MD_REPORT.write(
-        textwrap.dedent(
-            """
+    MD_REPORT.write(textwrap.dedent("""
 
     ## Top referrers and paths
 
@@ -146,9 +123,7 @@ def main() -> None:
     plotted at the right edge of that very time window. That is, these plots
     respond slowly to change (narrow peaks are smoothed out).
 
-    """
-        )
-    )
+    """))
 
     # Use the same x (time) axis limit as for view/clone plots further above.
     analyse_top_x_snapshots("referrer", gen_date_axis_lim((df_vc_agg,)))
@@ -176,26 +151,8 @@ def gen_date_axis_lim(dfs: Iterable[pd.DataFrame]) -> Tuple[str, str]:
     )
 
 
-def configure_altair():
-    # https://github.com/carbonplan/styles
-    alt.themes.enable("carbonplan_light")
-    # https://github.com/altair-viz/altair/issues/673#issuecomment-566567828
-    alt.renderers.set_embed_options(actions=False)
-
-
 def gen_report_footer():
-    js_footer = "\n".join(JS_FOOTER_LINES)
-    MD_REPORT.write(
-        textwrap.dedent(
-            f"""
-
-    <script type="text/javascript">
-    {js_footer}
-    </script>
-
-    """
-        ).strip()
-    )
+    pass
 
 
 def gen_report_preamble():
@@ -203,15 +160,11 @@ def gen_report_preamble():
     attr_link = (
         "[jgehrcke/github-repo-stats](https://github.com/jgehrcke/github-repo-stats)"
     )
-    MD_REPORT.write(
-        textwrap.dedent(
-            f"""
+    MD_REPORT.write(textwrap.dedent(f"""
     % Statistics for {ARGS.repospec}
     % Generated for [{ARGS.repospec}](https://github.com/{ARGS.repospec}) with {attr_link} at {now_text}.
 
-    """
-        ).strip()
-    )
+    """).strip())
 
 
 def report_pdf_pagebreak():
@@ -286,8 +239,7 @@ def gen_pandoc_html_template(target):
     assert target in ["html_browser_view", "html_pdf_view"]
 
     if target == "html_browser_view":
-        main_style_block = textwrap.dedent(
-            """
+        main_style_block = textwrap.dedent("""
             <style>
                 body {
                     box-sizing: border-box;
@@ -301,12 +253,10 @@ def gen_pandoc_html_template(target):
                     width: 100%;
                 }
             </style>
-        """
-        )
+        """)
 
     if target == "html_pdf_view":
-        main_style_block = textwrap.dedent(
-            """
+        main_style_block = textwrap.dedent("""
             <style>
                 @media print {
                   .pagebreak-for-print {
@@ -324,8 +274,7 @@ def gen_pandoc_html_template(target):
                     width: 100%;
                 }
             </style>
-        """
-        )
+        """)
 
     with open(os.path.join(ARGS.resources_directory, "template.html"), "rb") as f:
         tpl_text = f.read().decode("utf-8")
@@ -516,17 +465,13 @@ def analyse_top_x_snapshots(entity_type, date_axis_lim):
     # and contains imformation about multiple timestamps
 
     if not len(snapshot_dfs):
-        MD_REPORT.write(
-            textwrap.dedent(
-                f"""
+        MD_REPORT.write(textwrap.dedent(f"""
 
         #### {heading}
 
         No {entity_type} data available.
 
-        """
-            )
-        )
+        """))
         return
 
     # First, create a dataframe containing all information.
@@ -681,74 +626,52 @@ def analyse_top_x_snapshots(entity_type, date_axis_lim):
 
     y_axis_scale_type = symlog_or_lin(df_melted, "views_unique_norm", 8)
 
-    x_kwargs = DATETIME_AXIS_PROPERTIES.copy()
+    chart_id = f"chart_{entity_type}s_top_n_alltime"
+    fig = go.Figure()
+    for ename in top_n_enames:
+        edf = df_melted[df_melted[entity_type] == ename].dropna(
+            subset=["views_unique_norm"]
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=edf["time"],
+                y=edf["views_unique_norm"],
+                mode="lines+markers",
+                name=ename,
+                hovertemplate=(
+                    f"<b>{ename}</b><br>"
+                    "date: %{x|%B %e, %Y}<br>"
+                    "views (14d mean): %{y:.2f}<extra></extra>"
+                ),
+            )
+        )
+
+    fig.update_layout(
+        height=300,
+        autosize=True,
+        margin={"l": 50, "r": 20, "t": 20, "b": 50},
+        legend={
+            "title": "Legend:",
+            "yanchor": "top",
+            "y": 0.99,
+            "xanchor": "left",
+            "x": 0.01,
+        },
+        yaxis_title="unique visitors per day (mean from last 14 days)",
+        xaxis_title="date",
+        template="plotly_white",
+    )
+    fig.update_yaxes(type=y_axis_scale_type, rangemode="tozero")
     if date_axis_lim is not None:
         log.info("custom time window for top %s plot: %s", entity_type, date_axis_lim)
-        x_kwargs["scale"] = alt.Scale(domain=date_axis_lim)
+        fig.update_xaxes(range=list(date_axis_lim))
 
-    panel_props = {
-        "height": 300,
-        "width": "container",
-        "padding": 10,
-    }
-
-    chart = (
-        alt.Chart(df_melted)
-        .mark_line(point=True)
-        # .encode(x="time:T", y="views_unique:Q", color="referrer:N")
-        # the pandas dataframe datetimeindex contains timing information at
-        # much higher resolution than 1 day. The resulting vega spec may
-        # then see time values like this: `"time": "2021-01-03T00:00:00+00:00"`
-        # -- suggesting to vega that we care about showing hours and minutes.
-        # instruct vega to only care about _days_ (dates), via an altair-based
-        # timeout unit transformation. Ref:
-        # https://altair-viz.github.io/user_guide/transform/timeunit.html
-        .encode(
-            x=alt.X(**x_kwargs),
-            y=alt.Y(
-                "views_unique_norm",
-                type="quantitative",
-                title="unique visitors per day (mean from last 14 days)",
-                scale=alt.Scale(
-                    domain=(0, df_melted["views_unique_norm"].max() * 1.1),
-                    zero=True,
-                    type=y_axis_scale_type,
-                ),
-            ),
-            color=alt.Color(
-                entity_type,
-                type="nominal",
-                sort=alt.SortField("order"),
-                # https://vega.github.io/vega-lite/docs/legend.html#legend-properties
-                legend={
-                    # "orient": "bottom",
-                    "orient": "top",
-                    "direction": "vertical",
-                    # "legendX": 120,
-                    # "legendY": 340,
-                    "title": "Legend:",
-                },
-            ),
-            tooltip=[
-                entity_type,
-                alt.Tooltip(
-                    "views_unique_norm:Q", format=".2f", title="views (14d mean)"
-                ),
-                alt.Tooltip("time:T", format="%B %e, %Y", title="date"),
-            ],
-        )
-        .configure_point(size=30)
-        .properties(**panel_props)
+    chart_html = fig.to_html(
+        full_html=False,
+        div_id=chart_id,
+        include_plotlyjs=False,
+        config={"displayModeBar": False},
     )
-
-    chart_spec = chart.to_json(indent=None)
-
-    # From
-    # https://altair-viz.github.io/user_guide/customization.html
-    # "Note that this will only scale with the container if its parent element
-    # has a size determined outside the chart itself; For example, the
-    # container may be a <div> element that has style width: 100%; height:
-    # 300px.""
 
     # Textual form: larger N, and no cutoff (arbitrary length and legend of
     # plot don't go well with each other).
@@ -758,25 +681,18 @@ def analyse_top_x_snapshots(entity_type, date_axis_lim):
         f"{str(i).zfill(2)}: `{n}`" for i, n in enumerate(top_n_enames, 1)
     )
 
-    MD_REPORT.write(
-        textwrap.dedent(
-            f"""
+    MD_REPORT.write(textwrap.dedent(f"""
 
 
     #### {heading}
 
 
-    <div id="chart_{entity_type}s_top_n_alltime" class="full-width-chart"></div>
+    {chart_html}
 
     Top {top_n} {entity_type}s: {top_n_enames_string_for_md}
 
 
-    """
-        )
-    )
-    JS_FOOTER_LINES.append(
-        f"vegaEmbed('#chart_{entity_type}s_top_n_alltime', {chart_spec}, {VEGA_EMBED_OPTIONS_JSON}).catch(console.error);"
-    )
+    """))
 
 
 def analyse_view_clones_ts_fragments() -> pd.DataFrame:
@@ -1036,8 +952,8 @@ def analyse_view_clones_ts_fragments() -> pd.DataFrame:
         )
         bin_width_hours = max(int(timespan_hours / 500), 1)
         log.info("views/clones downsample bin_width_hours: %s", bin_width_hours)
-        df_agg = df_agg.resample(f"{bin_width_hours}h", origin="end").max().dropna(
-            how="all"
+        df_agg = (
+            df_agg.resample(f"{bin_width_hours}h", origin="end").max().dropna(how="all")
         )
         log.info("views/clones after downsample: %s data points", len(df_agg))
 
@@ -1045,163 +961,77 @@ def analyse_view_clones_ts_fragments() -> pd.DataFrame:
     df_agg_views = df_agg.drop(columns=["clones_unique", "clones_total"])
     df_agg_clones = df_agg.drop(columns=["views_unique", "views_total"])
 
-    PANEL_WIDTH = "container"
     PANEL_HEIGHT = 200
 
-    panel_props = {"height": PANEL_HEIGHT, "width": PANEL_WIDTH, "padding": 10}
-
-    x_kwargs = DATETIME_AXIS_PROPERTIES.copy()
-
-    # sync date axis range across all views/clone plots.
-    x_kwargs["scale"] = alt.Scale(domain=date_axis_lim)
-
-    yaxis = alt.Axis()
-    yaxistype = symlog_or_lin(df_agg_clones, "clones_unique", 100)
-    if yaxistype == "symlog":
-        yaxis = alt.Axis(values=[1, 10, 50, 100, 500, 1000, 5000, 10000])
-    chart_clones_unique = (
-        (
-            alt.Chart(df_agg_clones)
-            .mark_line(point=True)
-            .encode(
-                alt.X(**x_kwargs),
-                alt.Y(
-                    "clones_unique",
-                    type="quantitative",
-                    title="unique clones per day",
-                    axis=yaxis,
-                    scale=alt.Scale(
-                        domain=(0, df_agg_clones["clones_unique"].max() * 1.1),
-                        zero=True,
-                        type=yaxistype,
-                    ),
-                ),
-                tooltip=[
-                    alt.Tooltip("clones_unique:Q", format=".1f", title="clones (u)"),
-                    alt.Tooltip("time:T", format="%B %e, %Y", title="date"),
-                ],
+    def _make_line_fig(df, col, ytitle, date_axis_lim):
+        yaxistype = symlog_or_lin(df, col, 100)
+        fig = go.Figure(
+            go.Scatter(
+                x=df["time"],
+                y=df[col],
+                mode="lines+markers",
+                marker={"size": 5},
+                hovertemplate="date: %{x|%B %e, %Y}<br>"
+                + ytitle
+                + ": %{y:.1f}<extra></extra>",
             )
         )
-        .configure_axisY(labelBound=True)
-        .configure_point(size=20)
-        .properties(**panel_props)
-    )
-
-    yaxis = alt.Axis()
-    yaxistype = symlog_or_lin(df_agg_clones, "clones_total", 100)
-    if yaxistype == "symlog":
-        yaxis = alt.Axis(values=[1, 10, 50, 100, 500, 1000, 5000, 10000])
-    chart_clones_total = (
-        (
-            alt.Chart(df_agg_clones)
-            .mark_line(point=True)
-            .encode(
-                alt.X(**x_kwargs),
-                alt.Y(
-                    "clones_total",
-                    type="quantitative",
-                    title="total clones per day",
-                    axis=yaxis,
-                    scale=alt.Scale(
-                        domain=(0, df_agg_clones["clones_total"].max() * 1.1),
-                        zero=True,
-                        type=yaxistype,
-                    ),
-                ),
-                tooltip=[
-                    alt.Tooltip("clones_total:Q", format=".1f", title="clones (t)"),
-                    alt.Tooltip("time:T", format="%B %e, %Y", title="date"),
-                ],
-            )
+        fig.update_layout(
+            height=PANEL_HEIGHT,
+            autosize=True,
+            margin={"l": 50, "r": 20, "t": 10, "b": 50},
+            yaxis_title=ytitle,
+            xaxis_title="date",
+            template="plotly_white",
+            showlegend=False,
         )
-        .configure_axisY(labelBound=True)
-        .configure_point(size=20)
-        .properties(**panel_props)
+        fig.update_yaxes(type=yaxistype, rangemode="tozero")
+        fig.update_xaxes(range=list(date_axis_lim))
+        return fig
+
+    chart_clones_unique = _make_line_fig(
+        df_agg_clones, "clones_unique", "unique clones per day", date_axis_lim
+    )
+    chart_clones_total = _make_line_fig(
+        df_agg_clones, "clones_total", "total clones per day", date_axis_lim
+    )
+    chart_views_unique = _make_line_fig(
+        df_agg_views, "views_unique", "unique views per day", date_axis_lim
+    )
+    chart_views_total = _make_line_fig(
+        df_agg_views, "views_total", "total views per day", date_axis_lim
     )
 
-    yaxis = alt.Axis()
-    yaxistype = symlog_or_lin(df_agg_views, "views_unique", 100)
-    if yaxistype == "symlog":
-        yaxis = alt.Axis(values=[1, 10, 50, 100, 500, 1000, 5000, 10000])
-    chart_views_unique = (
-        (
-            alt.Chart(df_agg_views)
-            .mark_line(point=True)
-            .encode(
-                alt.X(**x_kwargs),
-                alt.Y(
-                    "views_unique",
-                    type="quantitative",
-                    title="unique views per day",
-                    axis=yaxis,
-                    scale=alt.Scale(
-                        domain=(0, df_agg_views["views_unique"].max() * 1.1),
-                        zero=True,
-                        type=yaxistype,
-                    ),
-                ),
-                tooltip=[
-                    alt.Tooltip("views_unique:Q", format=".1f", title="views (u)"),
-                    alt.Tooltip("time:T", format="%B %e, %Y", title="date"),
-                ],
-            )
-        )
-        .configure_axisY(labelBound=True)
-        .configure_point(size=20)
-        .properties(**panel_props)
+    _html_kwargs = {
+        "full_html": False,
+        "include_plotlyjs": False,
+        "config": {"displayModeBar": False},
+    }
+    chart_views_unique_html = chart_views_unique.to_html(
+        div_id="chart_views_unique", **_html_kwargs
+    )
+    chart_views_total_html = chart_views_total.to_html(
+        div_id="chart_views_total", **_html_kwargs
+    )
+    chart_clones_unique_html = chart_clones_unique.to_html(
+        div_id="chart_clones_unique", **_html_kwargs
+    )
+    chart_clones_total_html = chart_clones_total.to_html(
+        div_id="chart_clones_total", **_html_kwargs
     )
 
-    yaxis = alt.Axis()
-    yaxistype = symlog_or_lin(df_agg_views, "views_total", 100)
-    if yaxistype == "symlog":
-        yaxis = alt.Axis(values=[1, 10, 50, 100, 500, 1000, 5000, 10000])
-    chart_views_total = (
-        (
-            alt.Chart(df_agg_views)
-            .mark_line(point=True)
-            .encode(
-                alt.X(**x_kwargs),
-                alt.Y(
-                    "views_total",
-                    type="quantitative",
-                    title="total views per day",
-                    axis=yaxis,
-                    scale=alt.Scale(
-                        domain=(0, df_agg_views["views_total"].max() * 1.1),
-                        zero=True,
-                        type=yaxistype,
-                    ),
-                ),
-                tooltip=[
-                    alt.Tooltip("views_total:Q", format=".1f", title="views (t)"),
-                    alt.Tooltip("time:T", format="%B %e, %Y", title="date"),
-                ],
-            )
-        )
-        .configure_axisY(labelBound=True)
-        .configure_point(size=20)
-        .properties(**panel_props)
-    )
-
-    chart_views_unique_spec = chart_views_unique.to_json(indent=None)
-    chart_views_total_spec = chart_views_total.to_json(indent=None)
-    chart_clones_unique_spec = chart_clones_unique.to_json(indent=None)
-    chart_clones_total_spec = chart_clones_total.to_json(indent=None)
-
-    MD_REPORT.write(
-        textwrap.dedent(
-            f"""
+    MD_REPORT.write(textwrap.dedent(f"""
 
 
     ## Views
 
     #### Unique visitors
-    <div id="chart_views_unique" class="full-width-chart"></div>
+    {chart_views_unique_html}
 
     Cumulative: {df_agg_views["views_unique"].sum()}
 
     #### Total views
-    <div id="chart_views_total" class="full-width-chart"></div>
+    {chart_views_total_html}
 
     Cumulative: {df_agg_views["views_total"].sum()}
 
@@ -1210,26 +1040,16 @@ def analyse_view_clones_ts_fragments() -> pd.DataFrame:
     ## Clones
 
     #### Unique cloners
-    <div id="chart_clones_unique" class="full-width-chart"></div>
+    {chart_clones_unique_html}
 
     Cumulative: {df_agg_clones["clones_unique"].sum()}
 
     #### Total clones
-    <div id="chart_clones_total" class="full-width-chart"></div>
+    {chart_clones_total_html}
 
     Cumulative: {df_agg_clones["clones_total"].sum()}
 
-    """
-        )
-    )
-    JS_FOOTER_LINES.extend(
-        [
-            f"vegaEmbed('#chart_views_unique', {chart_views_unique_spec}, {VEGA_EMBED_OPTIONS_JSON}).catch(console.error);",
-            f"vegaEmbed('#chart_views_total', {chart_views_total_spec}, {VEGA_EMBED_OPTIONS_JSON}).catch(console.error);",
-            f"vegaEmbed('#chart_clones_unique', {chart_clones_unique_spec}, {VEGA_EMBED_OPTIONS_JSON}).catch(console.error);",
-            f"vegaEmbed('#chart_clones_total', {chart_clones_total_spec}, {VEGA_EMBED_OPTIONS_JSON}).catch(console.error);",
-        ]
-    )
+    """))
 
     return df_agg_for_return
 
@@ -1244,68 +1064,61 @@ def add_stargazers_section(
     Include a markdown section also for zero length time series (no stars)
     """
     if not len(df):
-        MD_REPORT.write(
-            textwrap.dedent(
-                """
+        MD_REPORT.write(textwrap.dedent("""
 
         ## Stargazers
 
         This repository has no stars yet.
 
-        """
-            )
-        )
+        """))
         return
 
     # date_axis_lim is expected to be of the form ["2019-01-01", "2019-12-31"]
 
-    x_kwargs = DATETIME_AXIS_PROPERTIES.copy()
-
     if date_axis_lim is not None:
         log.info("custom time window for stargazer plot: %s", date_axis_lim)
-        x_kwargs["scale"] = alt.Scale(domain=date_axis_lim)
 
-    panel_props = {"height": 300, "width": "container", "padding": 10}
-    chart = (
-        alt.Chart(df.reset_index())
-        .mark_line(point=True)
-        .encode(
-            alt.X(**x_kwargs),
-            alt.Y(
-                "stars_cumulative",
-                type="quantitative",
-                title="stargazer count (cumulative)",
-                scale=alt.Scale(
-                    domain=(0, df["stars_cumulative"].max() * 1.1),
-                    zero=True,
-                ),
-            ),
-            tooltip=[
-                alt.Tooltip("stars_cumulative:Q", format="d", title="stars"),
-                alt.Tooltip("time:T", format="%B %e, %Y", title="date"),
-            ],
+    df_plot = df.reset_index()
+    fig = go.Figure(
+        go.Scatter(
+            x=df_plot["time"],
+            y=df_plot["stars_cumulative"],
+            mode="lines+markers",
+            marker={"size": 7},
+            hovertemplate="date: %{x|%B %e, %Y}<br>stars: %{y:d}<extra></extra>",
         )
-        .configure_point(size=50)
-        .properties(**panel_props)
+    )
+    fig.update_layout(
+        height=300,
+        autosize=True,
+        margin={"l": 50, "r": 20, "t": 10, "b": 50},
+        yaxis_title="stargazer count (cumulative)",
+        xaxis_title="date",
+        template="plotly_white",
+        showlegend=False,
+    )
+    fig.update_yaxes(rangemode="tozero")
+    if date_axis_lim is not None:
+        fig.update_xaxes(range=list(date_axis_lim))
+
+    chart_html = fig.to_html(
+        full_html=False,
+        div_id="chart_stargazers",
+        include_plotlyjs=False,
+        config={"displayModeBar": False},
     )
 
-    chart_spec = chart.to_json(indent=None)
-
-    MD_REPORT.write(
-        textwrap.dedent(
-            """
+    MD_REPORT.write(textwrap.dedent(f"""
 
     ## Stargazers
 
     Each data point corresponds to at least one stargazer event.
     The time resolution is one day.
 
-    <div id="chart_stargazers" class="full-width-chart"></div>
+    {chart_html}
 
 
-    """
-        )
-    )
+    """))
 
     if starts_earlier_than_vc_data:
         MD_REPORT.write(
@@ -1313,10 +1126,6 @@ def add_stargazers_section(
             + "view/clone plots above "
             + "because the star/fork data contains earlier samples.\n\n"
         )
-
-    JS_FOOTER_LINES.append(
-        f"vegaEmbed('#chart_stargazers', {chart_spec}, {VEGA_EMBED_OPTIONS_JSON}).catch(console.error);"
-    )
 
 
 def add_fork_section(
@@ -1329,68 +1138,61 @@ def add_fork_section(
     Include a markdown section also for zero length time series (no forks)
     """
     if not len(df):
-        MD_REPORT.write(
-            textwrap.dedent(
-                """
+        MD_REPORT.write(textwrap.dedent("""
 
         ## Forks
 
         This repository has no forks yet.
 
-        """
-            )
-        )
+        """))
         return
 
     # date_axis_lim is expected to be of the form ["2019-01-01", "2019-12-31"])
 
-    x_kwargs = DATETIME_AXIS_PROPERTIES.copy()
-
     if date_axis_lim:
         log.info("custom time window for fork plot: %s", date_axis_lim)
-        x_kwargs["scale"] = alt.Scale(domain=date_axis_lim)
 
-    panel_props = {"height": 300, "width": "container", "padding": 10}
-    chart = (
-        alt.Chart(df.reset_index())
-        .mark_line(point=True)
-        .encode(
-            alt.X(**x_kwargs),
-            alt.Y(
-                "forks_cumulative",
-                type="quantitative",
-                title="fork count (cumulative)",
-                scale=alt.Scale(
-                    domain=(0, df["forks_cumulative"].max() * 1.1),
-                    zero=True,
-                ),
-            ),
-            tooltip=[
-                alt.Tooltip("forks_cumulative:Q", format="d", title="forks"),
-                alt.Tooltip("time:T", format="%B %e, %Y", title="date"),
-            ],
+    df_plot = df.reset_index()
+    fig = go.Figure(
+        go.Scatter(
+            x=df_plot["time"],
+            y=df_plot["forks_cumulative"],
+            mode="lines+markers",
+            marker={"size": 7},
+            hovertemplate="date: %{x|%B %e, %Y}<br>forks: %{y:d}<extra></extra>",
         )
-        .configure_point(size=50)
-        .properties(**panel_props)
+    )
+    fig.update_layout(
+        height=300,
+        autosize=True,
+        margin={"l": 50, "r": 20, "t": 10, "b": 50},
+        yaxis_title="fork count (cumulative)",
+        xaxis_title="date",
+        template="plotly_white",
+        showlegend=False,
+    )
+    fig.update_yaxes(rangemode="tozero")
+    if date_axis_lim:
+        fig.update_xaxes(range=list(date_axis_lim))
+
+    chart_html = fig.to_html(
+        full_html=False,
+        div_id="chart_forks",
+        include_plotlyjs=False,
+        config={"displayModeBar": False},
     )
 
-    chart_spec = chart.to_json(indent=None)
-
-    MD_REPORT.write(
-        textwrap.dedent(
-            """
+    MD_REPORT.write(textwrap.dedent(f"""
 
     ## Forks
 
     Each data point corresponds to at least one fork event.
     The time resolution is one day.
 
-    <div id="chart_forks" class="full-width-chart"></div>
+    {chart_html}
 
 
-    """
-        )
-    )
+    """))
 
     if starts_earlier_than_vc_data:
         MD_REPORT.write(
@@ -1399,20 +1201,17 @@ def add_fork_section(
             + "because the star/fork data contains earlier samples.\n\n"
         )
 
-    JS_FOOTER_LINES.append(
-        f"vegaEmbed('#chart_forks', {chart_spec}, {VEGA_EMBED_OPTIONS_JSON}).catch(console.error);"
-    )
-
 
 def symlog_or_lin(df, colname, threshold):
-    # TODO: decide between 'linear' and 'symlog' axis based on the value range
+    # Decide between 'linear' and 'log' axis based on the value range.
+    # Plotly uses 'log' (base-10 log scale) where Altair used 'symlog'.
     rmin = df[colname].min()
     rmax = df[colname].max()
     log.info(f"df[{colname}] min: {rmin}, max: {rmax}")
 
     if rmax - rmin > threshold:
-        log.info(f"df[{colname}]: use symlog scale, because range > {threshold}")
-        return "symlog"
+        log.info(f"df[{colname}]: use log scale, because range > {threshold}")
+        return "log"
 
     log.info(f"df[{colname}]: use linear scale")
     return "linear"
