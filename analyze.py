@@ -129,7 +129,6 @@ def main() -> None:
     analyse_top_x_snapshots("referrer", gen_date_axis_lim((df_vc_agg,)))
     analyse_top_x_snapshots("path", gen_date_axis_lim((df_vc_agg,)))
 
-    gen_report_footer()
     finalize_and_render_report()
 
 
@@ -149,10 +148,6 @@ def gen_date_axis_lim(dfs: Iterable[pd.DataFrame]) -> Tuple[str, str]:
             "%Y-%m-%d"
         ),
     )
-
-
-def gen_report_footer():
-    pass
 
 
 def gen_report_preamble():
@@ -279,10 +274,20 @@ def gen_pandoc_html_template(target):
     with open(os.path.join(ARGS.resources_directory, "template.html"), "rb") as f:
         tpl_text = f.read().decode("utf-8")
 
+    # Build CDN URL matching the installed plotly package version so that
+    # the Python API and the JS renderer are always in sync.
+    import plotly as _plotly
+
+    plotly_version = _plotly.__version__
+    plotly_cdn_url = f"https://cdn.plot.ly/plotly-{plotly_version}.min.js"
+    log.info("Plotly CDN URL: %s", plotly_cdn_url)
+
     # Do simple string replacement instead of picking one of the established
     # templating methods: the pandoc template language uses dollar signs, and
     # the CSS in the file uses curly braces.
-    rendered_pandoc_template = tpl_text.replace("MAIN_STYLE_BLOCK", main_style_block)
+    rendered_pandoc_template = tpl_text.replace(
+        "PLOTLY_CDN_SCRIPT", plotly_cdn_url
+    ).replace("MAIN_STYLE_BLOCK", main_style_block)
 
     # Do a pragmatic close/unlink effort at end of program. It's not so bad in
     # this case when either does not happen. Note that if the temp file path
@@ -1205,11 +1210,13 @@ def add_fork_section(
 def symlog_or_lin(df, colname, threshold):
     # Decide between 'linear' and 'log' axis based on the value range.
     # Plotly uses 'log' (base-10 log scale) where Altair used 'symlog'.
+    # Note: Plotly log axes cannot display 0 or negative values, so only
+    # use 'log' when all values are strictly positive.
     rmin = df[colname].min()
     rmax = df[colname].max()
     log.info(f"df[{colname}] min: {rmin}, max: {rmax}")
 
-    if rmax - rmin > threshold:
+    if rmax - rmin > threshold and rmin > 0:
         log.info(f"df[{colname}]: use log scale, because range > {threshold}")
         return "log"
 

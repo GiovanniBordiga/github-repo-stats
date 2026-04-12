@@ -85,11 +85,15 @@ def gen_pdf_bytes(html_apath):
 
         driver.get(f"file:///{html_apath}")
 
-        # Wait for Plotly to add its graph div(s) to the DOM.
-        first_plot_div = waiter.until(
-            presence_of_element_located((By.CSS_SELECTOR, "div.js-plotly-plot"))
+        # Wait for Plotly to finish rendering the first chart.
+        # The outer div.js-plotly-plot is inserted by the static HTML, but the
+        # inner svg.main-svg is only present once Plotly has finished drawing.
+        first_plot_svg = waiter.until(
+            presence_of_element_located(
+                (By.CSS_SELECTOR, "div.js-plotly-plot svg.main-svg")
+            )
         )
-        log.info("first plotly graph div detected: %s", first_plot_div)
+        log.info("first plotly svg detected: %s", first_plot_svg)
 
         # Be sure that SVG rendering completed. It's unclear if this is
         # actually needed. A matter of caution with practically no downside
