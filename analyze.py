@@ -277,18 +277,21 @@ def gen_pandoc_html_template(target):
     # Build CDN URL matching the installed plotly package version so that
     # the Python API and the JS renderer are always in sync.
     # Build the Plotly JS block for this target.
-    # For browser view: use a CDN <script> tag. Derive the URL from plotly's
-    # own internal function so the JS version always matches the Python package.
-    # For PDF view: embed Plotly.js inline to avoid CDN dependency when Chrome
-    # opens a local file:/// URL.
-    from plotly.io._html import get_plotlyjs, plotly_cdn_url as _plotly_cdn_url
+    # For browser view: use a CDN <script> tag, pinned to the JS version that
+    # ships with the installed plotly package (not the Python package version).
+    # For PDF view: embed Plotly.js inline so Chrome can render the local
+    # file:/// URL without requiring CDN access.
+    from plotly.offline import get_plotlyjs, get_plotlyjs_version
 
+    _plotlyjs_version = get_plotlyjs_version()
     if target == "html_browser_view":
-        _cdn_url = _plotly_cdn_url()
+        _cdn_url = f"https://cdn.plot.ly/plotly-{_plotlyjs_version}.min.js"
         log.info("Plotly CDN URL for browser view: %s", _cdn_url)
         plotly_js_block = f'<script src="{_cdn_url}" charset="utf-8"></script>'
     else:
-        log.info("Embedding Plotly.js inline for PDF view")
+        log.info(
+            "Embedding Plotly.js inline for PDF view (version %s)", _plotlyjs_version
+        )
         plotly_js_block = f"<script>{get_plotlyjs()}</script>"
 
     # Do simple string replacement instead of picking one of the established
