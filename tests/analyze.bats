@@ -164,9 +164,17 @@ setup() {
   run grep "background-color: #0d1117" $BATS_TEST_TMPDIR/outdir/report_for_pdf.html
   [ "$status" -eq 1 ]
 
-  # Legend label/title colors should be injected in the chart spec for dark mode
-  run grep '"labelColor": "#c9d1d9"' $BATS_TEST_TMPDIR/outdir/report.md
+  # Dark vega-embed config should be injected into browser HTML for dark mode
+  run grep '"background": "#161b22"' $BATS_TEST_TMPDIR/outdir/report.html
   [ "$status" -eq 0 ]
+
+  # Dark vega-embed config should NOT be present in PDF HTML
+  run grep '"background": "#161b22"' $BATS_TEST_TMPDIR/outdir/report_for_pdf.html
+  [ "$status" -eq 1 ]
+
+  # Chart specs in report.md should not contain dark colors (theme applied at render time)
+  run grep '"labelColor": "#c9d1d9"' $BATS_TEST_TMPDIR/outdir/report.md
+  [ "$status" -eq 1 ]
 }
 
 @test "analyze.py: --theme light: dark CSS absent in report.html" {
@@ -187,7 +195,11 @@ setup() {
   run grep "background-color: #0d1117" $BATS_TEST_TMPDIR/outdir/report.html
   [ "$status" -eq 1 ]
 
-  # Legend label colors should NOT be injected for light mode
+  # No dark vega-embed config for light theme
+  run grep '"background": "#161b22"' $BATS_TEST_TMPDIR/outdir/report.html
+  [ "$status" -eq 1 ]
+
+  # Chart specs should not contain dark colors for light mode
   run grep '"labelColor": "#c9d1d9"' $BATS_TEST_TMPDIR/outdir/report.md
   [ "$status" -eq 1 ]
 }

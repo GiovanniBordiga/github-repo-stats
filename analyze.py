@@ -67,7 +67,12 @@ JS_FOOTER_LINES: list[str] = []
 # https://github.com/vega/vega-embed#options -- use SVG renderer so that PDF
 # export (print) from browser view yields arbitrarily scalable (vector)
 # graphics embedded in the PDF doc, instead of rasterized graphics.
-VEGA_EMBED_OPTIONS_JSON = json.dumps({"actions": False, "renderer": "svg"})
+# These are the base options injected into every HTML template. Theme-specific
+# config (e.g. dark background/axis colors) is added on top in
+# gen_pandoc_html_template() and exposed to charts via the JS variable
+# _ghrsVegaEmbedOpts, so that PDF output is always rendered with light colors
+# regardless of the chosen --theme.
+VEGA_EMBED_BASE_OPTS: dict = {"actions": False, "renderer": "svg"}
 
 DATE_LABEL_ANGLE = 25
 DATETIME_AXIS_PROPERTIES = {
@@ -205,23 +210,16 @@ def _ghrs_dark_theme() -> dict:
 
 
 def configure_altair():
-    # https://github.com/carbonplan/styles
-    if ARGS.theme == "dark":
-        try:
-            alt.themes.enable("carbonplan_dark")
-        except Exception:
-            # carbonplan_dark may not be available in all versions; fall back to
-            # a minimal inline dark theme that sets a dark background and light
-            # text/gridline colors for Vega-Lite charts.
-            alt.themes.register("ghrs_dark", _ghrs_dark_theme)
-            alt.themes.enable("ghrs_dark")
-    else:
-        try:
-            alt.themes.enable("carbonplan_light")
-        except Exception:
-            # carbonplan_light may not be available; Vega-Lite's default theme
-            # is already a light theme, so no explicit registration is needed.
-            pass
+    # Always generate chart specs with the light/default Vega-Lite theme so
+    # that dark colors are never baked into the chart JSON. The dark theme is
+    # applied at render time via a vega-embed config override injected into the
+    # browser HTML template (see gen_pandoc_html_template).
+    try:
+        alt.themes.enable("carbonplan_light")
+    except Exception:
+        # carbonplan_light may not be available; Vega-Lite's default theme
+        # is already a light theme, so no explicit registration is needed.
+        pass
     # https://github.com/altair-viz/altair/issues/673#issuecomment-566567828
     alt.renderers.set_embed_options(actions=False)
 
@@ -422,7 +420,7 @@ def gen_pandoc_html_template(target):
             """
             )
 
-    if target == "html_pdf_view":
+    else:  # html_pdf_view
         main_style_block = textwrap.dedent(
             """
             <style>
@@ -444,6 +442,21 @@ def gen_pandoc_html_template(target):
             </style>
         """
         )
+
+    # Inject the _ghrsVegaEmbedOpts JS variable into every template.  All
+    # vegaEmbed() calls in report.md reference this variable so that the
+    # vega-lite config (e.g. dark background and axis colors) can be controlled
+    # per output target without baking theme colors into the chart JSON specs.
+    # The PDF template always uses the base (light) options so that PDF output
+    # is unaffected by the --theme choice.
+    if target == "html_browser_view" and ARGS.theme == "dark":
+        vega_embed_opts = {**VEGA_EMBED_BASE_OPTS, "config": _ghrs_dark_theme()["config"]}
+    else:
+        vega_embed_opts = VEGA_EMBED_BASE_OPTS
+    vega_embed_opts_json = json.dumps(vega_embed_opts)
+    main_style_block += (
+        f"\n<script>var _ghrsVegaEmbedOpts = {vega_embed_opts_json};</script>\n"
+    )
 
     with open(os.path.join(ARGS.resources_directory, "template.html"), "rb") as f:
         tpl_text = f.read().decode("utf-8")
@@ -845,11 +858,6 @@ def analyse_top_x_snapshots(entity_type, date_axis_lim):
                     # "legendX": 120,
                     # "legendY": 340,
                     "title": "Legend:",
-                    **(
-                        {"labelColor": "#c9d1d9", "titleColor": "#c9d1d9"}
-                        if ARGS.theme == "dark"
-                        else {}
-                    ),
                 },
             ),
             tooltip=[
@@ -898,7 +906,7 @@ def analyse_top_x_snapshots(entity_type, date_axis_lim):
         )
     )
     JS_FOOTER_LINES.append(
-        f"vegaEmbed('#chart_{entity_type}s_top_n_alltime', {chart_spec}, {VEGA_EMBED_OPTIONS_JSON}).catch(console.error);"
+        f"vegaEmbed('#chart_{entity_type}s_top_n_alltime', {chart_spec}, _ghrsVegaEmbedOpts).catch(console.error);"
     )
 
 
@@ -1347,10 +1355,10 @@ def analyse_view_clones_ts_fragments() -> pd.DataFrame:
     )
     JS_FOOTER_LINES.extend(
         [
-            f"vegaEmbed('#chart_views_unique', {chart_views_unique_spec}, {VEGA_EMBED_OPTIONS_JSON}).catch(console.error);",
-            f"vegaEmbed('#chart_views_total', {chart_views_total_spec}, {VEGA_EMBED_OPTIONS_JSON}).catch(console.error);",
-            f"vegaEmbed('#chart_clones_unique', {chart_clones_unique_spec}, {VEGA_EMBED_OPTIONS_JSON}).catch(console.error);",
-            f"vegaEmbed('#chart_clones_total', {chart_clones_total_spec}, {VEGA_EMBED_OPTIONS_JSON}).catch(console.error);",
+            f"vegaEmbed('#chart_views_unique', {chart_views_unique_spec}, _ghrsVegaEmbedOpts).catch(console.error);",
+            f"vegaEmbed('#chart_views_total', {chart_views_total_spec}, _ghrsVegaEmbedOpts).catch(console.error);",
+            f"vegaEmbed('#chart_clones_unique', {chart_clones_unique_spec}, _ghrsVegaEmbedOpts).catch(console.error);",
+            f"vegaEmbed('#chart_clones_total', {chart_clones_total_spec}, _ghrsVegaEmbedOpts).catch(console.error);",
         ]
     )
 
@@ -1438,7 +1446,7 @@ def add_stargazers_section(
         )
 
     JS_FOOTER_LINES.append(
-        f"vegaEmbed('#chart_stargazers', {chart_spec}, {VEGA_EMBED_OPTIONS_JSON}).catch(console.error);"
+        f"vegaEmbed('#chart_stargazers', {chart_spec}, _ghrsVegaEmbedOpts).catch(console.error);"
     )
 
 
@@ -1523,7 +1531,7 @@ def add_fork_section(
         )
 
     JS_FOOTER_LINES.append(
-        f"vegaEmbed('#chart_forks', {chart_spec}, {VEGA_EMBED_OPTIONS_JSON}).catch(console.error);"
+        f"vegaEmbed('#chart_forks', {chart_spec}, _ghrsVegaEmbedOpts).catch(console.error);"
     )
 
 
