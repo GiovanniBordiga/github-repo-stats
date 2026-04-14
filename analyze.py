@@ -182,7 +182,7 @@ def gen_date_axis_lim(dfs: Iterable[pd.DataFrame]) -> Tuple[str, str]:
 
 
 def _ghrs_dark_theme() -> dict:
-    # Minimal dark Vega theme used as fallback when carbonplan_dark is unavailable.
+    # Dark Vega-Lite config used for the browser dark-mode vega-embed override.
     return {
         "config": {
             "background": "#161b22",
