@@ -216,10 +216,12 @@ def configure_altair():
     # browser HTML template (see gen_pandoc_html_template).
     try:
         alt.themes.enable("carbonplan_light")
-    except Exception:
+    except ValueError:
         # carbonplan_light may not be available; Vega-Lite's default theme
         # is already a light theme, so no explicit registration is needed.
-        pass
+        logging.warning(
+            "Altair theme 'carbonplan_light' is unavailable; falling back to the default Vega-Lite light theme."
+        )
     # https://github.com/altair-viz/altair/issues/673#issuecomment-566567828
     alt.renderers.set_embed_options(actions=False)
 
