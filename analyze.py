@@ -215,7 +215,7 @@ def configure_altair():
     if ARGS.theme == "dark":
         try:
             alt.themes.enable("carbonplan_dark")
-        except Exception:
+        except ValueError:
             # carbonplan_dark may not be available in all environments; fall
             # back to a minimal inline dark theme that sets a dark background
             # and light text/gridline colors for Vega-Lite charts.
@@ -224,7 +224,7 @@ def configure_altair():
     else:
         try:
             alt.themes.enable("carbonplan_light")
-        except Exception:
+        except ValueError:
             # carbonplan_light may not be available; Vega-Lite's default theme
             # is already a light theme, so no explicit registration is needed.
             pass
