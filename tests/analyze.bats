@@ -160,20 +160,20 @@ setup() {
   run grep "background-color: #0d1117" $BATS_TEST_TMPDIR/outdir/report.html
   [ "$status" -eq 0 ]
 
-  # PDF HTML should remain light (no dark override)
+  # PDF HTML should remain light (no dark CSS)
   run grep "background-color: #0d1117" $BATS_TEST_TMPDIR/outdir/report_for_pdf.html
   [ "$status" -eq 1 ]
 
-  # Dark vega-embed config should be injected into browser HTML for dark mode
-  run grep '"background": "#161b22"' $BATS_TEST_TMPDIR/outdir/report.html
+  # Chart specs in report.md should contain dark theme colors (baked in by Altair)
+  run grep '"background": "#161b22"' $BATS_TEST_TMPDIR/outdir/report.md
   [ "$status" -eq 0 ]
 
-  # Dark vega-embed config should NOT be present in PDF HTML
-  run grep '"background": "#161b22"' $BATS_TEST_TMPDIR/outdir/report_for_pdf.html
-  [ "$status" -eq 1 ]
+  # PDF HTML should have the patch function to strip dark config at render time
+  run grep "patch:" $BATS_TEST_TMPDIR/outdir/report_for_pdf.html
+  [ "$status" -eq 0 ]
 
-  # Chart specs in report.md should not contain dark colors (theme applied at render time)
-  run grep '"labelColor": "#c9d1d9"' $BATS_TEST_TMPDIR/outdir/report.md
+  # Browser HTML should NOT have the patch function (dark spec used as-is)
+  run grep "patch:" $BATS_TEST_TMPDIR/outdir/report.html
   [ "$status" -eq 1 ]
 }
 
@@ -195,11 +195,7 @@ setup() {
   run grep "background-color: #0d1117" $BATS_TEST_TMPDIR/outdir/report.html
   [ "$status" -eq 1 ]
 
-  # No dark vega-embed config for light theme
-  run grep '"background": "#161b22"' $BATS_TEST_TMPDIR/outdir/report.html
-  [ "$status" -eq 1 ]
-
   # Chart specs should not contain dark colors for light mode
-  run grep '"labelColor": "#c9d1d9"' $BATS_TEST_TMPDIR/outdir/report.md
+  run grep '"background": "#161b22"' $BATS_TEST_TMPDIR/outdir/report.md
   [ "$status" -eq 1 ]
 }

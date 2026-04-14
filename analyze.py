@@ -67,11 +67,9 @@ JS_FOOTER_LINES: list[str] = []
 # https://github.com/vega/vega-embed#options -- use SVG renderer so that PDF
 # export (print) from browser view yields arbitrarily scalable (vector)
 # graphics embedded in the PDF doc, instead of rasterized graphics.
-# These are the base options injected into every HTML template. Theme-specific
-# config (e.g. dark background/axis colors) is added on top in
-# gen_pandoc_html_template() and exposed to charts via the JS variable
-# _ghrsVegaEmbedOpts, so that PDF output is always rendered with light colors
-# regardless of the chosen --theme.
+# These are the base vega-embed options included in every HTML template.
+# The PDF template also injects a patch function that strips dark theme colors
+# from chart specs at render time so PDF output is always light-themed.
 VEGA_EMBED_BASE_OPTS: dict = {"actions": False, "renderer": "svg"}
 
 DATE_LABEL_ANGLE = 25
@@ -182,7 +180,10 @@ def gen_date_axis_lim(dfs: Iterable[pd.DataFrame]) -> Tuple[str, str]:
 
 
 def _ghrs_dark_theme() -> dict:
-    # Dark Vega-Lite config used for the browser dark-mode vega-embed override.
+    # Dark Vega-Lite config used as the Altair theme when --theme dark is
+    # chosen.  Colors are baked into the chart JSON specs at generation time
+    # and rendered in the browser HTML.  The PDF HTML template strips these
+    # colors via a vega-embed patch function (see gen_pandoc_html_template).
     return {
         "config": {
             "background": "#161b22",
@@ -210,18 +211,23 @@ def _ghrs_dark_theme() -> dict:
 
 
 def configure_altair():
-    # Always generate chart specs with the light/default Vega-Lite theme so
-    # that dark colors are never baked into the chart JSON. The dark theme is
-    # applied at render time via a vega-embed config override injected into the
-    # browser HTML template (see gen_pandoc_html_template).
-    try:
-        alt.themes.enable("carbonplan_light")
-    except ValueError:
-        # carbonplan_light may not be available; Vega-Lite's default theme
-        # is already a light theme, so no explicit registration is needed.
-        logging.warning(
-            "Altair theme 'carbonplan_light' is unavailable; falling back to the default Vega-Lite light theme."
-        )
+    # https://github.com/carbonplan/styles
+    if ARGS.theme == "dark":
+        try:
+            alt.themes.enable("carbonplan_dark")
+        except Exception:
+            # carbonplan_dark may not be available in all environments; fall
+            # back to a minimal inline dark theme that sets a dark background
+            # and light text/gridline colors for Vega-Lite charts.
+            alt.themes.register("ghrs_dark", _ghrs_dark_theme)
+            alt.themes.enable("ghrs_dark")
+    else:
+        try:
+            alt.themes.enable("carbonplan_light")
+        except Exception:
+            # carbonplan_light may not be available; Vega-Lite's default theme
+            # is already a light theme, so no explicit registration is needed.
+            pass
     # https://github.com/altair-viz/altair/issues/673#issuecomment-566567828
     alt.renderers.set_embed_options(actions=False)
 
@@ -446,19 +452,43 @@ def gen_pandoc_html_template(target):
         )
 
     # Inject the _ghrsVegaEmbedOpts JS variable into every template.  All
-    # vegaEmbed() calls in report.md reference this variable so that the
-    # vega-lite config (e.g. dark background and axis colors) can be controlled
-    # per output target without baking theme colors into the chart JSON specs.
-    # The PDF template always uses the base (light) options so that PDF output
-    # is unaffected by the --theme choice.
-    if target == "html_browser_view" and ARGS.theme == "dark":
-        vega_embed_opts = {**VEGA_EMBED_BASE_OPTS, "config": _ghrs_dark_theme()["config"]}
+    # vegaEmbed() calls in report.md reference this variable.
+    #
+    # When --theme dark is chosen, chart specs have dark Vega-Lite config baked
+    # in (set by configure_altair).  The browser HTML uses those specs as-is so
+    # charts render dark.  The PDF HTML needs charts to always render light, so
+    # we inject a vega-embed `patch` function that strips dark-theme color
+    # properties from the spec config before vega-embed compiles it.
+    base_opts_json = json.dumps(VEGA_EMBED_BASE_OPTS)
+    if target == "html_pdf_view":
+        # Build a JS literal (not JSON) so we can include the patch function.
+        main_style_block += textwrap.dedent(
+            f"""
+            <script>
+            var _ghrsVegaEmbedOpts = Object.assign({base_opts_json}, {{
+                patch: function(s) {{
+                    if (s && s.config) {{
+                        delete s.config.background;
+                        ["axis", "header", "legend", "title"].forEach(function(t) {{
+                            if (s.config[t]) {{
+                                ["color", "labelColor", "titleColor", "gridColor",
+                                 "domainColor", "tickColor", "strokeColor", "fillColor"
+                                ].forEach(function(k) {{ delete s.config[t][k]; }});
+                            }}
+                        }});
+                        if (s.config.view) {{ delete s.config.view.stroke; }}
+                    }}
+                    return s;
+                }}
+            }});
+            </script>
+            """
+        )
     else:
-        vega_embed_opts = VEGA_EMBED_BASE_OPTS
-    vega_embed_opts_json = json.dumps(vega_embed_opts)
-    main_style_block += (
-        f"\n<script>var _ghrsVegaEmbedOpts = {vega_embed_opts_json};</script>\n"
-    )
+        # Browser HTML: chart spec provides theme colors directly; no patch needed.
+        main_style_block += (
+            f"\n<script>var _ghrsVegaEmbedOpts = {base_opts_json};</script>\n"
+        )
 
     with open(os.path.join(ARGS.resources_directory, "template.html"), "rb") as f:
         tpl_text = f.read().decode("utf-8")
