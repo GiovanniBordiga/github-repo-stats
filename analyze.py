@@ -67,7 +67,10 @@ JS_FOOTER_LINES: list[str] = []
 # https://github.com/vega/vega-embed#options -- use SVG renderer so that PDF
 # export (print) from browser view yields arbitrarily scalable (vector)
 # graphics embedded in the PDF doc, instead of rasterized graphics.
-VEGA_EMBED_OPTIONS_JSON = json.dumps({"actions": False, "renderer": "svg"})
+# These are the base vega-embed options included in every HTML template.
+# The PDF template also injects a patch function that strips dark theme colors
+# from chart specs at render time so PDF output is always light-themed.
+VEGA_EMBED_BASE_OPTS: dict = {"actions": False, "renderer": "svg"}
 
 DATE_LABEL_ANGLE = 25
 DATETIME_AXIS_PROPERTIES = {
@@ -176,9 +179,55 @@ def gen_date_axis_lim(dfs: Iterable[pd.DataFrame]) -> Tuple[str, str]:
     )
 
 
+def _ghrs_dark_theme() -> dict:
+    # Dark Vega-Lite config used as the Altair theme when --theme dark is
+    # chosen.  Colors are baked into the chart JSON specs at generation time
+    # and rendered in the browser HTML.  The PDF HTML template strips these
+    # colors via a vega-embed patch function (see gen_pandoc_html_template).
+    return {
+        "config": {
+            "background": "#161b22",
+            "view": {"stroke": "transparent"},
+            "axis": {
+                "domainColor": "#8b949e",
+                "gridColor": "#30363d",
+                "labelColor": "#c9d1d9",
+                "tickColor": "#8b949e",
+                "titleColor": "#c9d1d9",
+            },
+            "header": {
+                "labelColor": "#c9d1d9",
+                "titleColor": "#c9d1d9",
+            },
+            "legend": {
+                "fillColor": "transparent",
+                "labelColor": "#c9d1d9",
+                "strokeColor": "#30363d",
+                "titleColor": "#c9d1d9",
+            },
+            "title": {"color": "#c9d1d9"},
+        }
+    }
+
+
 def configure_altair():
     # https://github.com/carbonplan/styles
-    alt.themes.enable("carbonplan_light")
+    if ARGS.theme == "dark":
+        try:
+            alt.themes.enable("carbonplan_dark")
+        except ValueError:
+            # carbonplan_dark may not be available in all environments; fall
+            # back to a minimal inline dark theme that sets a dark background
+            # and light text/gridline colors for Vega-Lite charts.
+            alt.themes.register("ghrs_dark", _ghrs_dark_theme)
+            alt.themes.enable("ghrs_dark")
+    else:
+        try:
+            alt.themes.enable("carbonplan_light")
+        except ValueError:
+            # carbonplan_light may not be available; Vega-Lite's default theme
+            # is already a light theme, so no explicit registration is needed.
+            pass
     # https://github.com/altair-viz/altair/issues/673#issuecomment-566567828
     alt.renderers.set_embed_options(actions=False)
 
@@ -304,7 +353,82 @@ def gen_pandoc_html_template(target):
         """
         )
 
-    if target == "html_pdf_view":
+        if ARGS.theme == "dark":
+            main_style_block += textwrap.dedent(
+                """
+                <style>
+                    body {
+                        background-color: #0d1117;
+                    }
+
+                    .markdown-body {
+                        color: #c9d1d9;
+                        background-color: #0d1117;
+                    }
+
+                    .markdown-body a {
+                        color: #58a6ff;
+                    }
+
+                    .markdown-body h1,
+                    .markdown-body h2,
+                    .markdown-body h3,
+                    .markdown-body h4,
+                    .markdown-body h5,
+                    .markdown-body h6 {
+                        color: #e6edf3;
+                    }
+
+                    .markdown-body h1,
+                    .markdown-body h2 {
+                        border-bottom: 1px solid #30363d;
+                    }
+
+                    .markdown-body hr {
+                        background-color: #30363d;
+                    }
+
+                    .markdown-body blockquote {
+                        color: #8b949e;
+                        border-left-color: #30363d;
+                    }
+
+                    .markdown-body code,
+                    .markdown-body tt {
+                        background-color: #161b22;
+                        color: #c9d1d9;
+                    }
+
+                    .markdown-body pre {
+                        background-color: #161b22;
+                    }
+
+                    .markdown-body pre code {
+                        background-color: transparent;
+                    }
+
+                    .markdown-body table tr {
+                        background-color: #0d1117;
+                        border-top-color: #30363d;
+                    }
+
+                    .markdown-body table tr:nth-child(2n) {
+                        background-color: #161b22;
+                    }
+
+                    .markdown-body table th,
+                    .markdown-body table td {
+                        border-color: #30363d;
+                    }
+
+                    .markdown-body img {
+                        background-color: transparent;
+                    }
+                </style>
+            """
+            )
+
+    else:  # html_pdf_view
         main_style_block = textwrap.dedent(
             """
             <style>
@@ -325,6 +449,45 @@ def gen_pandoc_html_template(target):
                 }
             </style>
         """
+        )
+
+    # Inject the _ghrsVegaEmbedOpts JS variable into every template.  All
+    # vegaEmbed() calls in report.md reference this variable.
+    #
+    # When --theme dark is chosen, chart specs have dark Vega-Lite config baked
+    # in (set by configure_altair).  The browser HTML uses those specs as-is so
+    # charts render dark.  The PDF HTML needs charts to always render light, so
+    # we inject a vega-embed `patch` function that strips dark-theme color
+    # properties from the spec config before vega-embed compiles it.
+    base_opts_json = json.dumps(VEGA_EMBED_BASE_OPTS)
+    if target == "html_pdf_view":
+        # Build a JS literal (not JSON) so we can include the patch function.
+        main_style_block += textwrap.dedent(
+            f"""
+            <script>
+            var _ghrsVegaEmbedOpts = Object.assign({base_opts_json}, {{
+                patch: function(s) {{
+                    if (s && s.config) {{
+                        delete s.config.background;
+                        ["axis", "header", "legend", "title"].forEach(function(t) {{
+                            if (s.config[t]) {{
+                                ["color", "labelColor", "titleColor", "gridColor",
+                                 "domainColor", "tickColor", "strokeColor", "fillColor"
+                                ].forEach(function(k) {{ delete s.config[t][k]; }});
+                            }}
+                        }});
+                        if (s.config.view) {{ delete s.config.view.stroke; }}
+                    }}
+                    return s;
+                }}
+            }});
+            </script>
+            """
+        )
+    else:
+        # Browser HTML: chart spec provides theme colors directly; no patch needed.
+        main_style_block += (
+            f"\n<script>var _ghrsVegaEmbedOpts = {base_opts_json};</script>\n"
         )
 
     with open(os.path.join(ARGS.resources_directory, "template.html"), "rb") as f:
@@ -775,7 +938,7 @@ def analyse_top_x_snapshots(entity_type, date_axis_lim):
         )
     )
     JS_FOOTER_LINES.append(
-        f"vegaEmbed('#chart_{entity_type}s_top_n_alltime', {chart_spec}, {VEGA_EMBED_OPTIONS_JSON}).catch(console.error);"
+        f"vegaEmbed('#chart_{entity_type}s_top_n_alltime', {chart_spec}, _ghrsVegaEmbedOpts).catch(console.error);"
     )
 
 
@@ -1224,10 +1387,10 @@ def analyse_view_clones_ts_fragments() -> pd.DataFrame:
     )
     JS_FOOTER_LINES.extend(
         [
-            f"vegaEmbed('#chart_views_unique', {chart_views_unique_spec}, {VEGA_EMBED_OPTIONS_JSON}).catch(console.error);",
-            f"vegaEmbed('#chart_views_total', {chart_views_total_spec}, {VEGA_EMBED_OPTIONS_JSON}).catch(console.error);",
-            f"vegaEmbed('#chart_clones_unique', {chart_clones_unique_spec}, {VEGA_EMBED_OPTIONS_JSON}).catch(console.error);",
-            f"vegaEmbed('#chart_clones_total', {chart_clones_total_spec}, {VEGA_EMBED_OPTIONS_JSON}).catch(console.error);",
+            f"vegaEmbed('#chart_views_unique', {chart_views_unique_spec}, _ghrsVegaEmbedOpts).catch(console.error);",
+            f"vegaEmbed('#chart_views_total', {chart_views_total_spec}, _ghrsVegaEmbedOpts).catch(console.error);",
+            f"vegaEmbed('#chart_clones_unique', {chart_clones_unique_spec}, _ghrsVegaEmbedOpts).catch(console.error);",
+            f"vegaEmbed('#chart_clones_total', {chart_clones_total_spec}, _ghrsVegaEmbedOpts).catch(console.error);",
         ]
     )
 
@@ -1315,7 +1478,7 @@ def add_stargazers_section(
         )
 
     JS_FOOTER_LINES.append(
-        f"vegaEmbed('#chart_stargazers', {chart_spec}, {VEGA_EMBED_OPTIONS_JSON}).catch(console.error);"
+        f"vegaEmbed('#chart_stargazers', {chart_spec}, _ghrsVegaEmbedOpts).catch(console.error);"
     )
 
 
@@ -1400,7 +1563,7 @@ def add_fork_section(
         )
 
     JS_FOOTER_LINES.append(
-        f"vegaEmbed('#chart_forks', {chart_spec}, {VEGA_EMBED_OPTIONS_JSON}).catch(console.error);"
+        f"vegaEmbed('#chart_forks', {chart_spec}, _ghrsVegaEmbedOpts).catch(console.error);"
     )
 
 
@@ -1756,6 +1919,13 @@ def parse_args():
         default=False,
         action="store_true",
         help="Delete individual fragment CSV files after having written aggregate CSV file",
+    )
+
+    parser.add_argument(
+        "--theme",
+        default="dark",
+        choices=["dark", "light"],
+        help="Theme for the HTML report: dark (default) or light.",
     )
 
     args = parser.parse_args()

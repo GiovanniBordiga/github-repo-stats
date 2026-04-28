@@ -190,6 +190,7 @@ python "${GHRS_FILES_ROOT_PATH}/analyze.py" \
     --resources-directory "${GHRS_FILES_ROOT_PATH}/resources" \
     --output-directory latest-report \
     --outfile-prefix "" \
+    --theme "${INPUT_THEME}" \
     --stargazer-ts-inpath "stars-raw.csv" \
     --stargazer-ts-snapshot-inpath "ghrs-data/stargazer-snapshots.csv" \
     --fork-ts-inpath "forks-raw.csv" \

@@ -23,6 +23,10 @@ inputs:
       Set this if the data branch in the data repo is exposed via GitHub pages.
       Must not end with a slash. Example: https://jgehrcke.github.io/ghrs-test
     default: none
+  theme:
+    description: >
+      Theme for the HTML report. Options: dark, light. Default: dark.
+    default: dark
 runs:
   using: "docker"
   image: "Dockerfile"
