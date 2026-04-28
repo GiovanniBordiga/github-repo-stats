@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+Bug fixes:
+
+* Fix `OSError: Cannot save file into a non-existent directory: 'ghrs-data'` that caused the Action to fail when processing a repository whose data branch did not yet contain a `ghrs-data/` directory (e.g. first run for a new stats target). `fetch.py` now creates the parent directory before writing the stargazer-snapshot CSV, and `entrypoint.sh` creates `ghrs-data/` unconditionally before invoking `fetch.py`.
+
 ## 1.4.0 (2022-05-18)
 
 Bug fixes:
