@@ -18,6 +18,7 @@ import logging
 import os
 import json
 from datetime import datetime
+from pathlib import Path
 
 import sys
 from typing import Tuple
@@ -196,6 +197,7 @@ def fetch_and_write_stargazer_ts(repo: Repository.Repository, args):
             tmppath,
             args.stargazer_ts_snapshots_inoutpath,
         )
+        Path(tmppath).parent.mkdir(parents=True, exist_ok=True)
         updated_sdf.to_csv(tmppath, index_label="time_iso8601")
         os.rename(tmppath, args.stargazer_ts_snapshots_inoutpath)
 

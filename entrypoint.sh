@@ -128,6 +128,7 @@ cd "${STATS_REPOSPEC}"
 echo "operating in $(pwd)"
 
 mkdir -p newsnapshots
+mkdir -p ghrs-data
 echo "fetch.py for ${STATS_REPOSPEC}"
 
 # Have CPython emit its stderr data immediately to the attached streams to
