@@ -29,7 +29,6 @@ from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.expected_conditions import presence_of_element_located
 
-
 log = logging.getLogger()
 logging.basicConfig(
     level=logging.INFO,
@@ -86,11 +85,15 @@ def gen_pdf_bytes(html_apath):
 
         driver.get(f"file:///{html_apath}")
 
-        # Wait for Vega to add <svg> elemtn(s) to DOM.
-        first_svg = waiter.until(
-            presence_of_element_located((By.CSS_SELECTOR, "div>svg"))
+        # Wait for Plotly to finish rendering the first chart.
+        # The outer div.js-plotly-plot is inserted by the static HTML, but the
+        # inner svg.main-svg is only present once Plotly has finished drawing.
+        first_plot_svg = waiter.until(
+            presence_of_element_located(
+                (By.CSS_SELECTOR, "div.js-plotly-plot svg.main-svg")
+            )
         )
-        log.info("first <svg> element detected: %s", first_svg)
+        log.info("first plotly svg detected: %s", first_plot_svg)
 
         # Be sure that SVG rendering completed. It's unclear if this is
         # actually needed. A matter of caution with practically no downside
